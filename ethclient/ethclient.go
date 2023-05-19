@@ -115,6 +115,44 @@ type rpcBlock struct {
 	Withdrawals  []*types.Withdrawal `json:"withdrawals,omitempty"`
 }
 
+func sanitizeBlockBody(raw json.RawMessage) (json.RawMessage, error) {
+	fmt.Println(string(raw))
+	var body map[string]interface{}
+
+	err := json.Unmarshal(raw, &body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Assert that "transactions" is a slice
+	transactions, ok := body["transactions"].([]interface{})
+	if !ok {
+		return nil, errors.New("transactions is not a slice")
+	}
+
+	// Filter out transactions with type = "0x7f"
+	filtered := make([]interface{}, 0)
+	for _, tx := range transactions {
+		txMap, ok := tx.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		if txType, ok := txMap["type"].(string); ok && txType != "0x7f" {
+			filtered = append(filtered, tx)
+		}
+	}
+
+	body["transactions"] = filtered
+
+	// Marshal back to JSON
+	filteredRaw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	return filteredRaw, nil
+}
+
 func (ec *Client) getBlock(ctx context.Context, method string, args ...interface{}) (*types.Block, error) {
 	var raw json.RawMessage
 	err := ec.c.CallContext(ctx, &raw, method, args...)
@@ -133,8 +171,21 @@ func (ec *Client) getBlock(ctx context.Context, method string, args ...interface
 	}
 
 	var body rpcBlock
+	stateBlock := false
 	if err := json.Unmarshal(raw, &body); err != nil {
-		return nil, err
+		// we sanitize pessimistically for performance
+		if err.Error() == "transaction type not supported" {
+			raw, err = sanitizeBlockBody(raw)
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(raw, &body); err != nil {
+				return nil, err
+			}
+			stateBlock = true
+		} else {
+			return nil, err
+		}
 	}
 	// Quick-verify transaction and uncle lists. This mostly helps with debugging the server.
 	if head.UncleHash == types.EmptyUncleHash && len(body.UncleHashes) > 0 {
@@ -146,7 +197,9 @@ func (ec *Client) getBlock(ctx context.Context, method string, args ...interface
 	if head.TxHash == types.EmptyTxsHash && len(body.Transactions) > 0 {
 		return nil, fmt.Errorf("server returned non-empty transaction list but block header indicates no transactions")
 	}
-	if head.TxHash != types.EmptyTxsHash && len(body.Transactions) == 0 {
+
+	// We have to add && stateBlock == false, otherwise this protection check fails
+	if head.TxHash != types.EmptyTxsHash && len(body.Transactions) == 0 && stateBlock == false {
 		return nil, fmt.Errorf("server returned empty transaction list but block header indicates transactions")
 	}
 	// Load uncles because they are not included in the block response.
