@@ -115,41 +115,61 @@ type rpcBlock struct {
 	Withdrawals  []*types.Withdrawal `json:"withdrawals,omitempty"`
 }
 
+// sanitizeBlockBody takes in a raw JSON message representing the body of a block,
+// filters out any transactions with a type value of "0x7f", and returns the sanitized block body.
 func sanitizeBlockBody(raw json.RawMessage) (json.RawMessage, error) {
-	fmt.Println(string(raw))
+	// Define a variable to hold the unmarshalled JSON block body.
 	var body map[string]interface{}
 
+	// Unmarshal the raw JSON into the body variable.
 	err := json.Unmarshal(raw, &body)
 	if err != nil {
+		// If there's an error in unmarshalling, return the error.
 		return nil, err
 	}
 
-	// Assert that "transactions" is a slice
+	// Check that "transactions" is a slice.
 	transactions, ok := body["transactions"].([]interface{})
 	if !ok {
+		// If "transactions" is not a slice, return an error.
 		return nil, errors.New("transactions is not a slice")
 	}
 
-	// Filter out transactions with type = "0x7f"
-	filtered := make([]interface{}, 0)
+	// Preallocate a slice to hold the filtered transactions.
+	filtered := make([]interface{}, 0, len(transactions))
+
+	// Loop through each transaction in the slice.
 	for _, tx := range transactions {
+		// Assert that the transaction is a map.
 		txMap, ok := tx.(map[string]interface{})
 		if !ok {
-			continue
+			// If the transaction is not a map, then error
+			return nil, fmt.Errorf("transaction %+v is not an object", tx)
 		}
 
-		if txType, ok := txMap["type"].(string); ok && txType != "0x7f" {
+		txType, ok := txMap["type"].(string)
+		if !ok {
+			return nil, fmt.Errorf("the type field of transaction %+v is not a string", tx)
+		}
+
+		// Check that the "type" field is not equal to "0x7f".
+		if txType != "0x7f" {
+			// If the "type" field passes the check, add the transaction to the filtered slice.
 			filtered = append(filtered, tx)
 		}
 	}
 
+	// Update the "transactions" field in the body with the filtered transactions.
 	body["transactions"] = filtered
 
-	// Marshal back to JSON
+	// Marshal the body back into a raw JSON message.
 	filteredRaw, err := json.Marshal(body)
 	if err != nil {
+		// If there's an error in marshalling, return the error.
 		return nil, err
 	}
+
+	// Return the filtered raw JSON message.
 	return filteredRaw, nil
 }
 

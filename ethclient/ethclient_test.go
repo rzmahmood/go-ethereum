@@ -19,6 +19,7 @@ package ethclient
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -53,6 +54,65 @@ var (
 	// _ = ethereum.PendingStateEventer(&Client{})
 	_ = ethereum.PendingContractCaller(&Client{})
 )
+
+func TestSanitizeBlockBody(t *testing.T) {
+	// Define test cases
+	testCases := []struct {
+		name      string
+		input     json.RawMessage
+		expected  json.RawMessage
+		expectErr bool
+	}{
+		{
+			name:      "Test case 1: With type 0x7f",
+			input:     json.RawMessage(`{"baseFee":"0x3b9aca00","transactions":[{"type":"0x7f","value":"value1"},{"type":"0x0","value":"value2"}]}`),
+			expected:  json.RawMessage(`{"baseFee":"0x3b9aca00","transactions":[{"type":"0x0","value":"value2"}]}`),
+			expectErr: false,
+		},
+		{
+			name:      "Test case 2: Without type 0x7f",
+			input:     json.RawMessage(`{"baseFee":"0x3b9aca00","transactions":[{"type":"0x0","value":"value1"},{"type":"0x0","value":"value2"}]}`),
+			expected:  json.RawMessage(`{"baseFee":"0x3b9aca00","transactions":[{"type":"0x0","value":"value1"},{"type":"0x0","value":"value2"}]}`),
+			expectErr: false,
+		},
+		{
+			name:      "Test case 3: Invalid transaction type",
+			input:     json.RawMessage(`{"baseFee":"0x3b9aca00","transactions":[{"type":123,"value":"value1"},{"type":"0x0","value":"value2"}]}`),
+			expectErr: true,
+		},
+		{
+			name:      "Test case 4: Transaction is not a map",
+			input:     json.RawMessage(`{"baseFee":"0x3b9aca00","transactions":["notAMap", {"type":"0x0","value":"value2"}]}`),
+			expectErr: true,
+		},
+	}
+
+	// Run test cases
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := sanitizeBlockBody(tc.input)
+			if err != nil {
+				fmt.Println(err)
+			}
+			// Check for unexpected error
+			if err != nil && !tc.expectErr {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			// Check for expected error
+			if err == nil && tc.expectErr {
+				t.Fatal("Expected error, but got none")
+			}
+
+			// Only compare the result to the expected value if no error is expected
+			if !tc.expectErr {
+				if string(result) != string(tc.expected) {
+					t.Fatalf("Expected %v, got %v", string(tc.expected), string(result))
+				}
+			}
+		})
+	}
+}
 
 func TestToFilterArg(t *testing.T) {
 	blockHashErr := fmt.Errorf("cannot specify both BlockHash and FromBlock/ToBlock")
