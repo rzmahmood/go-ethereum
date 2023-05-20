@@ -194,7 +194,7 @@ func (ec *Client) getBlock(ctx context.Context, method string, args ...interface
 	stateBlock := false
 	if err := json.Unmarshal(raw, &body); err != nil {
 		// we sanitize pessimistically for performance
-		if err.Error() == "transaction type not supported" {
+		if errors.Is(err, types.ErrTxTypeNotSupported) {
 			raw, err = sanitizeBlockBody(raw)
 			if err != nil {
 				return nil, err
